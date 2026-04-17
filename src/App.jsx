@@ -31,15 +31,16 @@ const load     = (k, fb) => { try { const r = localStorage.getItem(k); return r 
 const save     = (k, v)  => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 const getLast7 = () => Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); return {key:d.toISOString().split("T")[0],label:DAYS[d.getDay()]}; });
 
-const DEFAULT_HABITS = [
-  { id:genId(), name:"Drink 8 glasses of water", completed:false, category:"Health",       priority:"high",   createdAt:todayKey(), history:[] },
-  { id:genId(), name:"Morning stretch 10 mins",  completed:false, category:"Health",       priority:"medium", createdAt:todayKey(), history:[] },
-  { id:genId(), name:"Read 30 minutes",           completed:false, category:"Learning",     priority:"medium", createdAt:todayKey(), history:[] },
-  { id:genId(), name:"Deep work session",         completed:false, category:"Productivity", priority:"high",   createdAt:todayKey(), history:[] },
-  { id:genId(), name:"5 min meditation",          completed:false, category:"Mindfulness",  priority:"low",    createdAt:todayKey(), history:[] },
-];
+const API = {
+  getState: () => fetch('/api/state').then(r => r.json()),
+  updateState: (state) => fetch('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state) }),
+  addHabit: (habit) => fetch('/api/habits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(habit) }).then(r => r.json()),
+  updateHabit: (id, updates) => fetch(`/api/habits/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) }).then(r => r.json()),
+  deleteHabit: (id) => fetch(`/api/habits/${id}`, { method: 'DELETE' }),
+  reorderHabits: (habitIds) => fetch('/api/habits/reorder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ habitIds }) })
+};
 
-function useDragReorder(setItems) {
+function useDragReorder(setItems, onReorder) {
   const dragIdx = useRef(null);
   return {
     onDragStart: (i) => { dragIdx.current = i; },
@@ -48,7 +49,12 @@ function useDragReorder(setItems) {
       if (dragIdx.current === null || dragIdx.current === i) return;
       setItems(prev => { const n=[...prev],[m]=n.splice(dragIdx.current,1); n.splice(i,0,m); dragIdx.current=i; return n; });
     },
-    onDragEnd: () => { dragIdx.current = null; },
+    onDragEnd: () => { 
+        if (dragIdx.current !== null) {
+            onReorder();
+        }
+        dragIdx.current = null; 
+    },
   };
 }
 
@@ -278,8 +284,9 @@ function HistoryLog({ habits }) {
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 
 export default function HabitTracker() {
-  const [habits,     setHabits]     = useState(()=>load("ht2_habits",DEFAULT_HABITS));
-  const [streakData, setStreakData] = useState(()=>load("ht2_streak",{current:0,best:0}));
+  const [habits,     setHabits]     = useState([]);
+  const [streakData, setStreakData] = useState({current:0, best:0});
+  const [loading,    setLoading]    = useState(true);
   const [filterCat,  setFilterCat]  = useState("All");
   const [filterStat, setFilterStat] = useState("All");
   const [activeTab,  setActiveTab]  = useState("today");
@@ -288,20 +295,31 @@ export default function HabitTracker() {
   const today  = todayKey();
   const last7  = getLast7();
 
-  useEffect(()=>{ save("ht2_habits",habits); },[habits]);
-  useEffect(()=>{ save("ht2_streak",streakData); },[streakData]);
-
-  useEffect(()=>{
-    const last = load("ht2_lastday",null);
-    if (last && last!==today) {
-      setHabits(prev=>{
-        const allDone = prev.every(h=>h.completed);
-        setStreakData(sd=>{ const nc=allDone?sd.current+1:0; return {current:nc,best:Math.max(sd.best,nc)}; });
-        return prev.map(h=>({...h,completed:false}));
-      });
-    }
-    save("ht2_lastday",today);
-  },[]);
+  useEffect(() => {
+    API.getState().then(data => {
+      setHabits(data.habits);
+      setStreakData({ current: data.state.currentStreak, best: data.state.bestStreak });
+      
+      const last = data.state.lastDay;
+      if (last && last !== today) {
+        setHabits(prev => {
+          const allDone = prev.every(h => h.completed);
+          const newCurrent = allDone ? data.state.currentStreak + 1 : 0;
+          const newBest = Math.max(data.state.bestStreak, newCurrent);
+          
+          setStreakData({ current: newCurrent, best: newBest });
+          API.updateState({ currentStreak: newCurrent, bestStreak: newBest, lastDay: today });
+          
+          const resetHabits = prev.map(h => ({ ...h, completed: false }));
+          resetHabits.forEach(h => API.updateHabit(h.id, { completed: false }));
+          return resetHabits;
+        });
+      } else if (!last) {
+          API.updateState({ lastDay: today });
+      }
+      setLoading(false);
+    });
+  }, [today]);
 
   const total     = habits.length;
   const completed = habits.filter(h=>h.completed).length;
@@ -314,29 +332,48 @@ export default function HabitTracker() {
     return catOk && stOk;
   });
 
-  const { onDragStart, onDragOver, onDragEnd } = useDragReorder(setHabits);
+  const { onDragStart, onDragOver, onDragEnd } = useDragReorder(setHabits, () => {
+    setHabits(currentHabits => {
+        API.reorderHabits(currentHabits.map(h => h.id));
+        return currentHabits;
+    });
+  });
 
   const addHabit = useCallback(({name,category,priority})=>{
-    setHabits(prev=>[...prev,{id:genId(),name,completed:false,category,priority,createdAt:today,history:[]}]);
-  },[today]);
+    const newHabit = {id:genId(),name,completed:false,category,priority,createdAt:today,history:[],order:habits.length};
+    setHabits(prev=>[...prev, newHabit]);
+    API.addHabit(newHabit);
+  },[today, habits.length]);
 
   const toggleHabit = useCallback((id)=>{
     setHabits(prev=>prev.map(h=>{
       if(h.id!==id) return h;
       const nowDone = !h.completed;
       const history = h.history||[];
-      return {...h, completed:nowDone, history: nowDone ? [...new Set([...history,today])] : history.filter(d=>d!==today)};
+      const newHistory = nowDone ? [...new Set([...history,today])] : history.filter(d=>d!==today);
+      const updates = { completed:nowDone, history: newHistory };
+      API.updateHabit(id, updates);
+      return {...h, ...updates};
     }));
   },[today]);
 
-  const deleteHabit = useCallback((id)=>{ setHabits(prev=>prev.filter(h=>h.id!==id)); },[]);
+  const deleteHabit = useCallback((id)=>{ 
+    setHabits(prev=>prev.filter(h=>h.id!==id)); 
+    API.deleteHabit(id);
+  },[]);
 
   const resetDay = ()=>{
-    setHabits(prev=>prev.map(h=>({...h,completed:false,history:(h.history||[]).filter(d=>d!==today)})));
+    setHabits(prev=>prev.map(h=>{
+      const updates = {completed:false,history:(h.history||[]).filter(d=>d!==today)};
+      API.updateHabit(h.id, updates);
+      return {...h, ...updates};
+    }));
     setJustReset(true); setTimeout(()=>setJustReset(false),1500);
   };
 
   const todayFmt = new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
+
+  if (loading) return <div style={{ minHeight:"100vh", background:"#fdf8f0", display:"flex", alignItems:"center", justifyContent:"center", color:"#1a1208", fontFamily:"'DM Sans',sans-serif" }}>Loading your habits...</div>;
 
   return (
     <div style={{ minHeight:"100vh", background:"#fdf8f0", color:"#1a1208", fontFamily:"'DM Sans',sans-serif", paddingBottom:80 }}>
