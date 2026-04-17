@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const habitSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true }, // Keeping the frontend generated ID
@@ -11,4 +11,4 @@ const habitSchema = new mongoose.Schema({
   order: { type: Number, default: 0 }
 });
 
-module.exports = mongoose.model('Habit', habitSchema);
+export default mongoose.model('Habit', habitSchema);

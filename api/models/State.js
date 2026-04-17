@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const stateSchema = new mongoose.Schema({
   currentStreak: { type: Number, default: 0 },
@@ -6,4 +6,4 @@ const stateSchema = new mongoose.Schema({
   lastDay: { type: String, default: "" }
 });
 
-module.exports = mongoose.model('State', stateSchema);
+export default mongoose.model('State', stateSchema);
