@@ -287,6 +287,7 @@ export default function HabitTracker() {
   const [habits,     setHabits]     = useState([]);
   const [streakData, setStreakData] = useState({current:0, best:0});
   const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState(null);
   const [filterCat,  setFilterCat]  = useState("All");
   const [filterStat, setFilterStat] = useState("All");
   const [activeTab,  setActiveTab]  = useState("today");
@@ -317,6 +318,10 @@ export default function HabitTracker() {
       } else if (!last) {
           API.updateState({ lastDay: today });
       }
+      setLoading(false);
+    }).catch(err => {
+      console.error("Failed to load habits:", err);
+      setError(err.message || "Unknown error occurred while connecting to the backend.");
       setLoading(false);
     });
   }, [today]);
@@ -374,6 +379,16 @@ export default function HabitTracker() {
   const todayFmt = new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
 
   if (loading) return <div style={{ minHeight:"100vh", background:"#fdf8f0", display:"flex", alignItems:"center", justifyContent:"center", color:"#1a1208", fontFamily:"'DM Sans',sans-serif" }}>Loading your habits...</div>;
+
+  if (error) return (
+    <div style={{ minHeight:"100vh", background:"#fdf8f0", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", color:"#e84545", fontFamily:"'DM Sans',sans-serif", padding: 20, textAlign: "center" }}>
+      <div style={{ fontSize: 40, marginBottom: 20 }}>⚠️</div>
+      <h2 style={{ fontFamily:"Fraunces, serif" }}>Connection Error</h2>
+      <p style={{ maxWidth: 400, color: "#6b5a42", lineHeight: 1.6 }}>{error}</p>
+      <p style={{ fontSize: 13, marginTop: 20, color: "#9a8f7e" }}>If this is on Vercel, please check if your <b>MONGODB_URI</b> is set correctly in settings.</p>
+      <button onClick={() => window.location.reload()} style={{ marginTop: 20, background: "#1a1208", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 10, cursor: "pointer" }}>Retry</button>
+    </div>
+  );
 
   return (
     <div style={{ minHeight:"100vh", background:"#fdf8f0", color:"#1a1208", fontFamily:"'DM Sans',sans-serif", paddingBottom:80 }}>

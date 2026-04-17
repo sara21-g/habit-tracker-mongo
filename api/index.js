@@ -12,9 +12,16 @@ app.use(cors());
 app.use(express.json());
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI)
+if (!process.env.MONGODB_URI) {
+  console.warn('WARNING: MONGODB_URI is not defined in environment variables.');
+}
+
+mongoose.connect(process.env.MONGODB_URI || '')
   .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('Could not connect to MongoDB', err));
+  .catch(err => {
+    console.error('CRITICAL: Could not connect to MongoDB.');
+    console.error('Error Details:', err.message);
+  });
 
 // Getting composite state (Habits + App State)
 app.get('/api/state', async (req, res) => {
